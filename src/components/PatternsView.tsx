@@ -17,13 +17,22 @@ import {
   AlertCircle,
   FileText,
   Flame,
+  Plus,
+  Lock,
+  Unlock,
+  Filter,
+  CheckCircle2,
+  Trash2,
 } from 'lucide-react';
 import {
   PatternsData,
   JournalReflection,
   FutureMeEntry,
-  ActiveTab,
+  ThenVsNowItem,
+  ThenVsNowCategory,
+  ReflectionLoopItem,
 } from '../types';
+import { FutureMeModal } from './FutureMeModal';
 
 interface PatternsViewProps {
   userId: string;
@@ -34,6 +43,8 @@ interface PatternsViewProps {
   onTriggerReanalyze: () => Promise<void>;
   onOpenReflection: (reflectionId: string) => void;
   onNavigateToWritePrompt: (promptText: string) => void;
+  onSaveFutureMe?: (entry: FutureMeEntry) => Promise<void>;
+  onDeleteFutureMe?: (id: string) => Promise<void>;
 }
 
 export const PatternsView: React.FC<PatternsViewProps> = ({
@@ -45,11 +56,23 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
   onTriggerReanalyze,
   onOpenReflection,
   onNavigateToWritePrompt,
+  onSaveFutureMe,
+  onDeleteFutureMe,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'overview' | 'thenVsNow' | 'themes' | 'memory' | 'futureMe'
+    'overview' | 'thenVsNow' | 'reflectionLoop' | 'themes' | 'memory' | 'futureMe'
   >('overview');
   const [dismissedChange, setDismissedChange] = useState(false);
+
+  // Then vs Now Category Filter
+  const [thenVsNowCategory, setThenVsNowCategory] = useState<string>('all');
+  const [isComparingCustom, setIsComparingCustom] = useState(false);
+  const [customThenVsNow, setCustomThenVsNow] = useState<ThenVsNowItem[] | null>(null);
+
+  // Future Me write modal
+  const [showFutureMeModal, setShowFutureMeModal] = useState(false);
+  const [comparingFutureId, setComparingFutureId] = useState<string | null>(null);
+  const [futureCompareError, setFutureCompareError] = useState<string | null>(null);
 
   const hasNewReflections =
     patterns && reflections.length !== patterns.entryCount;
@@ -63,8 +86,136 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
       })
     : null;
 
+  // Combine entries from futureMeEntries collection and reflections with isFutureMe
+  const allFutureMeEntries: FutureMeEntry[] = [
+    ...futureMeEntries,
+    ...reflections
+      .filter((r) => r.isFutureMe && !futureMeEntries.some((f) => f.reflectionId === r.id))
+      .map((r) => ({
+        id: `fm-${r.id}`,
+        userId,
+        reflectionId: r.id,
+        reflectionTitle: r.title,
+        reflectionSnippet: r.content.substring(0, 300),
+        title: r.title,
+        message: r.futureMeNote ? `${r.futureMeNote}\n\n${r.content}` : r.content,
+        writtenAt: r.createdAt,
+        unlockDate: r.futureMeUnlockDate || null,
+        isUnlocked: r.futureMeUnlockDate ? Date.now() >= r.futureMeUnlockDate : true,
+        comparison: null,
+      })),
+  ];
+
+  // Compare Future Me with Present Me
+  const handleCompareFutureMe = async (entry: FutureMeEntry) => {
+    setComparingFutureId(entry.id);
+    setFutureCompareError(null);
+    try {
+      const res = await fetch('/api/future-me-compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          futureMessage: entry.message,
+          writtenAt: entry.writtenAt,
+          title: entry.title,
+          reflections: reflections.map((r) => ({
+            id: r.id,
+            title: r.title,
+            content: r.content,
+            createdAt: r.createdAt,
+          })),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to compare Future Me letter');
+      }
+
+      const updatedEntry: FutureMeEntry = {
+        ...entry,
+        isUnlocked: true,
+        comparison: data.comparison,
+      };
+
+      if (onSaveFutureMe) {
+        await onSaveFutureMe(updatedEntry);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error comparing letter';
+      setFutureCompareError(msg);
+    } finally {
+      setComparingFutureId(null);
+    }
+  };
+
+  // Run On-Demand Then vs Now
+  const handleRunFocusedThenVsNow = async () => {
+    if (reflections.length < 2) return;
+    setIsComparingCustom(true);
+    try {
+      const res = await fetch('/api/then-vs-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reflections: reflections.map((r) => ({
+            id: r.id,
+            title: r.title,
+            content: r.content,
+            createdAt: r.createdAt,
+          })),
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && data.comparison?.items) {
+        setCustomThenVsNow(data.comparison.items);
+      }
+    } catch (err: unknown) {
+      console.error('Error running focused Then vs Now:', err);
+    } finally {
+      setIsComparingCustom(false);
+    }
+  };
+
+  // Extract items for Then vs Now
+  const thenVsNowItems: ThenVsNowItem[] =
+    customThenVsNow ||
+    patterns?.thenVsNow?.items ||
+    (patterns?.thenVsNow?.thenConcerns?.length
+      ? patterns.thenVsNow.thenConcerns.map((tc, idx) => ({
+          id: `item-${idx}`,
+          category: 'concern',
+          label: patterns.thenVsNow.thenThemes?.[idx] || 'Recurring Concern',
+          then: tc,
+          now: patterns.thenVsNow.nowConcerns?.[idx] || patterns.thenVsNow.nowThemes?.[idx] || 'Shifted focus in recent reflections',
+          whatChanged: patterns.thenVsNow.whatChangedGrounded || 'Your focus shifted noticeably over time.',
+          status: 'shifted',
+        }))
+      : []);
+
+  const filteredThenVsNowItems = thenVsNowItems.filter((item) => {
+    if (thenVsNowCategory === 'all') return true;
+    return item.category === thenVsNowCategory;
+  });
+
+  // Reflection Loops
+  const reflectionLoops: ReflectionLoopItem[] =
+    patterns?.reflectionLoops && patterns.reflectionLoops.length > 0
+      ? patterns.reflectionLoops
+      : (patterns?.recurringThemes || []).map((t, idx) => ({
+          id: `loop-${idx}`,
+          theme: t.theme,
+          pattern: `${t.theme} appears repeatedly across ${t.frequencyCount} reflections with a status of "${t.status}".`,
+          question: patterns?.personalQuestions?.[idx]?.question || `When you reflect on ${t.theme}, what currently feels most unresolved?`,
+          reflectionPrompt: `When I think about ${t.theme} today, what feels clearest versus what still feels uncertain...`,
+          observedChange: patterns?.somethingChanged?.headline || `Tracking how your perspective on ${t.theme} evolves across entries.`,
+          status: 'active',
+          sourceReflectionIds: t.sourceReflectionIds,
+        }));
+
   return (
-    <div className="flex flex-col h-full bg-white/70 backdrop-blur-md border border-stone-200/80 rounded-2xl overflow-hidden shadow-xs">
+    <div className="flex flex-col h-full bg-white/70 backdrop-blur-md border border-stone-200/80 rounded-2xl overflow-hidden shadow-xs font-sans">
       {/* Top Header */}
       <div className="p-4 sm:p-5 border-b border-stone-200/70 bg-stone-50/50 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -77,7 +228,7 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
                 Patterns & Evolution
               </h2>
               <p className="text-[11px] text-stone-500">
-                Longitudinal intelligence • See what keeps returning and how your thinking has evolved
+                Longitudinal intelligence • See what keeps returning and how your thinking has changed over time
               </p>
             </div>
           </div>
@@ -122,8 +273,9 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
         {/* Sub-tab Navigation */}
         <div className="flex items-center gap-1 overflow-x-auto text-[11px] pt-1">
           <button
+            id="subtab-overview"
             onClick={() => setActiveSubTab('overview')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer shrink-0 ${
               activeSubTab === 'overview'
                 ? 'bg-stone-900 text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
@@ -132,18 +284,38 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
             Overview & Shifts
           </button>
           <button
+            id="subtab-then-vs-now"
             onClick={() => setActiveSubTab('thenVsNow')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
               activeSubTab === 'thenVsNow'
                 ? 'bg-stone-900 text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
             }`}
           >
-            Then vs Now
+            <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Then vs Now</span>
+            {thenVsNowItems.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-indigo-100 text-indigo-800 font-mono">
+                {thenVsNowItems.length}
+              </span>
+            )}
           </button>
           <button
+            id="subtab-reflection-loop"
+            onClick={() => setActiveSubTab('reflectionLoop')}
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
+              activeSubTab === 'reflectionLoop'
+                ? 'bg-stone-900 text-white shadow-xs'
+                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
+            }`}
+          >
+            <RotateCw className="w-3 h-3 text-emerald-500" />
+            <span>Reflection Loop</span>
+          </button>
+          <button
+            id="subtab-themes"
             onClick={() => setActiveSubTab('themes')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer shrink-0 ${
               activeSubTab === 'themes'
                 ? 'bg-stone-900 text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
@@ -152,8 +324,9 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
             Recurring Themes ({patterns?.recurringThemes?.length || 0})
           </button>
           <button
+            id="subtab-memory"
             onClick={() => setActiveSubTab('memory')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer shrink-0 ${
               activeSubTab === 'memory'
                 ? 'bg-stone-900 text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
@@ -162,15 +335,16 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
             Reflection Memory ({patterns?.reflectionMemories?.length || 0})
           </button>
           <button
+            id="subtab-future-me"
             onClick={() => setActiveSubTab('futureMe')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer shrink-0 flex items-center gap-1 ${
               activeSubTab === 'futureMe'
                 ? 'bg-stone-900 text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
             }`}
           >
-            <Bookmark className="w-3 h-3 text-amber-500" />
-            <span>Future Me ({reflections.filter((r) => r.isFutureMe).length})</span>
+            <Bookmark className="w-3 h-3 text-amber-500 fill-amber-500" />
+            <span>Future Me ({allFutureMeEntries.length})</span>
           </button>
         </div>
       </div>
@@ -187,10 +361,10 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
             </h3>
             <p className="text-xs text-stone-500 leading-relaxed font-sans">
               MARGIN needs a little more history before it can spot meaningful changes and shifts in your thinking.
-              Write at least 2 or 3 reflections in your Journal to activate pattern recognition.
+              Write at least 2 reflections in your Journal to activate longitudinal pattern recognition and Then vs Now comparisons.
             </p>
           </div>
-        ) : !patterns ? (
+        ) : !patterns && isLoading ? (
           <div className="py-16 text-center text-xs text-stone-500 space-y-3">
             <div className="w-6 h-6 border-2 border-stone-800 border-t-transparent rounded-full animate-spin mx-auto" />
             <p>Synthesizing longitudinal patterns across your entries...</p>
@@ -198,7 +372,7 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
         ) : (
           <>
             {/* SUB-TAB 1: OVERVIEW & SHIFTS */}
-            {activeSubTab === 'overview' && (
+            {activeSubTab === 'overview' && patterns && (
               <div className="space-y-6">
                 {/* "SOMETHING CHANGED" Proactive Experience */}
                 {patterns.somethingChanged && !dismissedChange && (
@@ -259,64 +433,42 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
                           }
                           className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-700 hover:text-indigo-900 cursor-pointer"
                         >
-                          <span>See the reflections</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
+                          <span>Read recent reflection</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* Weekly Reflection Brief */}
+                {/* WEEKLY REFLECTION BRIEF */}
                 {patterns.weeklyBrief && (
                   <div className="p-5 rounded-2xl bg-white border border-stone-200/80 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                    <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-stone-500" />
-                        <h3 className="text-sm font-semibold text-stone-900 font-sans">
-                          Weekly Reflection Brief
+                        <Calendar className="w-4 h-4 text-stone-400" />
+                        <h3 className="text-sm font-semibold text-stone-900">
+                          {patterns.weeklyBrief.periodLabel}
                         </h3>
                       </div>
-                      <span className="text-xs text-stone-500">
-                        {patterns.weeklyBrief.periodLabel}
+                      <span className="text-[11px] text-stone-400">
+                        Synthesized Reflection
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                      {/* What occupied thoughts */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                       <div className="space-y-1.5">
-                        <span className="text-[10px] uppercase font-semibold text-stone-400 tracking-wider">
-                          What occupied your thoughts
+                        <span className="text-[10px] uppercase font-bold text-stone-400">
+                          What Stood Out
                         </span>
-                        <ul className="space-y-1">
-                          {patterns.weeklyBrief.occupiedThoughts.map(
-                            (thought, idx) => (
-                              <li
-                                key={idx}
-                                className="flex items-start gap-1.5 text-stone-700"
-                              >
-                                <span className="text-indigo-500 font-bold">•</span>
-                                <span>{thought}</span>
-                              </li>
-                            )
-                          )}
-                        </ul>
-                      </div>
-
-                      {/* What stood out */}
-                      <div className="space-y-1.5">
-                        <span className="text-[10px] uppercase font-semibold text-stone-400 tracking-wider">
-                          What stood out
-                        </span>
-                        <p className="text-stone-700 leading-relaxed">
+                        <p className="text-stone-800 leading-relaxed font-serif text-sm">
                           {patterns.weeklyBrief.whatStoodOut}
                         </p>
                       </div>
 
-                      {/* Worth exploring */}
                       <div className="space-y-1.5">
-                        <span className="text-[10px] uppercase font-semibold text-stone-400 tracking-wider">
-                          Worth exploring
+                        <span className="text-[10px] uppercase font-bold text-stone-400">
+                          Nuance Worth Exploring
                         </span>
                         <p className="text-stone-700 leading-relaxed">
                           {patterns.weeklyBrief.worthExploring}
@@ -348,153 +500,277 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
                     )}
                   </div>
                 )}
+              </div>
+            )}
 
-                {/* Personal Question Generator */}
-                {patterns.personalQuestions && patterns.personalQuestions.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-stone-900">
-                          Personal Question Generator
+            {/* SUB-TAB 2: THEN VS NOW (CORE DIFFERENTIATOR) */}
+            {activeSubTab === 'thenVsNow' && (
+              <div className="space-y-6">
+                {/* Intro Banner */}
+                <div className="p-5 bg-white border border-stone-200/80 rounded-2xl shadow-xs space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-serif font-semibold text-stone-900">
+                          Then vs Now — Longitudinal Comparison
                         </h3>
-                        <p className="text-xs text-stone-500">
-                          Questions emerging from your recurring themes: PATTERN → QUESTION → REFLECTION
-                        </p>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono font-medium">
+                          Core Differentiator
+                        </span>
                       </div>
+                      <p className="text-xs text-stone-500 mt-1">
+                        MARGIN doesn't just store entries. It compares your reflections across time to reveal shifts in concerns, priorities, emotional tone, and perspectives.
+                      </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {patterns.personalQuestions.map((q) => (
-                        <div
-                          key={q.id}
-                          className="p-4 bg-white border border-stone-200/80 rounded-xl shadow-xs space-y-2.5 flex flex-col justify-between"
-                        >
-                          <div className="space-y-1">
-                            <span className="text-[10px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
-                              {q.theme}
+                    <button
+                      type="button"
+                      onClick={handleRunFocusedThenVsNow}
+                      disabled={isComparingCustom || reflections.length < 2}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white text-xs font-medium shadow-xs transition-colors disabled:opacity-40 cursor-pointer"
+                    >
+                      <RotateCw className={`w-3.5 h-3.5 ${isComparingCustom ? 'animate-spin' : ''}`} />
+                      <span>{isComparingCustom ? 'Comparing...' : 'Run Focused Comparison'}</span>
+                    </button>
+                  </div>
+
+                  {/* Grounded Narrative Summary */}
+                  {patterns?.thenVsNow?.whatChangedGrounded && (
+                    <div className="p-4 bg-stone-50 rounded-xl border border-stone-200/70 text-xs text-stone-700 leading-relaxed space-y-1">
+                      <span className="text-[10px] font-mono uppercase font-bold text-stone-500">
+                        Overall Trajectory
+                      </span>
+                      <p>{patterns.thenVsNow.whatChangedGrounded}</p>
+                    </div>
+                  )}
+
+                  {/* Category Filter Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pt-2 border-t border-stone-100 text-[11px]">
+                    {[
+                      { id: 'all', label: 'All Shifts' },
+                      { id: 'concern', label: 'Concerns' },
+                      { id: 'priority', label: 'Priorities' },
+                      { id: 'emotional_tone', label: 'Emotional Tone' },
+                      { id: 'perspective', label: 'Perspective' },
+                      { id: 'topic', label: 'Recurring Topics' },
+                      { id: 'repeated_thought', label: 'Repeated Thoughts' },
+                    ].map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setThenVsNowCategory(cat.id)}
+                        className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer shrink-0 ${
+                          thenVsNowCategory === cat.id
+                            ? 'bg-stone-900 text-white'
+                            : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Structured Then vs Now Cards */}
+                {filteredThenVsNowItems.length === 0 ? (
+                  <div className="py-12 text-center text-xs text-stone-400 space-y-2">
+                    <TrendingUp className="w-8 h-8 text-stone-300 mx-auto stroke-1" />
+                    <p className="font-medium text-stone-600">No shifts recorded in this category yet</p>
+                    <p className="text-[11px]">
+                      Keep reflecting in your Journal to capture shifts in emotional tone, priorities, and perspective.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4">
+                    {filteredThenVsNowItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="p-5 bg-white border border-stone-200/80 rounded-2xl shadow-xs space-y-4"
+                      >
+                        {/* Header: Label + Category + Status */}
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
+                              {item.category.replace('_', ' ')}
                             </span>
-                            <h4 className="font-serif font-medium text-stone-900 text-sm pt-1">
-                              "{q.question}"
+                            <h4 className="font-serif font-semibold text-stone-900 text-sm">
+                              {item.label}
                             </h4>
-                            <p className="text-[11px] text-stone-500 leading-relaxed">
-                              {q.reason}
+                          </div>
+                          {item.status && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200 font-mono">
+                              Status: {item.status}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Comparative Cards: THEN vs NOW */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {/* THEN */}
+                          <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2">
+                            <div className="flex items-center justify-between text-[10px] text-stone-500 font-mono uppercase font-bold">
+                              <span>THEN (Earlier)</span>
+                              {item.thenDate && <span>{item.thenDate}</span>}
+                            </div>
+                            <p className="text-xs text-stone-800 font-serif italic leading-relaxed">
+                              "{item.then}"
                             </p>
+                            {item.thenSourceId && (
+                              <button
+                                onClick={() => onOpenReflection(item.thenSourceId!)}
+                                className="text-[10px] text-indigo-600 hover:underline cursor-pointer pt-1"
+                              >
+                                Read earlier reflection →
+                              </button>
+                            )}
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => onNavigateToWritePrompt(q.question)}
-                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-900 hover:text-indigo-700 pt-2 border-t border-stone-100 cursor-pointer"
-                          >
-                            <span>Write about this</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
-                          </button>
+                          {/* NOW */}
+                          <div className="p-3.5 bg-indigo-50/40 rounded-xl border border-indigo-100 space-y-2">
+                            <div className="flex items-center justify-between text-[10px] text-indigo-700 font-mono uppercase font-bold">
+                              <span>NOW (Recent)</span>
+                              {item.nowDate && <span>{item.nowDate}</span>}
+                            </div>
+                            <p className="text-xs text-stone-900 font-serif italic leading-relaxed">
+                              "{item.now}"
+                            </p>
+                            {item.nowSourceId && (
+                              <button
+                                onClick={() => onOpenReflection(item.nowSourceId!)}
+                                className="text-[10px] text-indigo-600 hover:underline cursor-pointer pt-1"
+                              >
+                                Read recent reflection →
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      ))}
-                    </div>
+
+                        {/* WHAT CHANGED */}
+                        <div className="p-3 bg-stone-50/70 border border-stone-200/80 rounded-xl space-y-1">
+                          <span className="text-[10px] uppercase font-bold text-stone-500 font-mono">
+                            WHAT CHANGED:
+                          </span>
+                          <p className="text-xs text-stone-800 leading-relaxed font-medium">
+                            {item.whatChanged}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             )}
 
-            {/* SUB-TAB 2: THEN VS NOW */}
-            {activeSubTab === 'thenVsNow' && patterns.thenVsNow && (
+            {/* SUB-TAB 3: REFLECTION LOOP (PATTERN → QUESTION → REFLECTION → CHANGE) */}
+            {activeSubTab === 'reflectionLoop' && (
               <div className="space-y-6">
-                <div className="p-5 bg-white border border-stone-200/80 rounded-2xl shadow-xs space-y-4">
-                  <div>
+                <div className="p-5 bg-white border border-stone-200/80 rounded-2xl shadow-xs space-y-3">
+                  <div className="flex items-center gap-2">
+                    <RotateCw className="w-4 h-4 text-emerald-600" />
                     <h3 className="text-base font-serif font-semibold text-stone-900">
-                      Longitudinal Comparison: Then vs Now
+                      The Reflection Loop
                     </h3>
-                    <p className="text-xs text-stone-500">
-                      Comparing earlier and recent reflection sets to observe grounded mindset shifts.
-                    </p>
                   </div>
+                  <p className="text-xs text-stone-500 leading-relaxed">
+                    MARGIN connects your journal reflections into a continuous developmental cycle:
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-center text-xs">
+                    <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-xl">
+                      <span className="text-[10px] font-mono uppercase text-stone-400 font-bold block">1. Pattern</span>
+                      <span className="text-stone-800 font-medium">Recurring themes identified</span>
+                    </div>
+                    <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-xl">
+                      <span className="text-[10px] font-mono uppercase text-stone-400 font-bold block">2. Question</span>
+                      <span className="text-stone-800 font-medium">Grounded inquiry generated</span>
+                    </div>
+                    <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-xl">
+                      <span className="text-[10px] font-mono uppercase text-stone-400 font-bold block">3. Reflection</span>
+                      <span className="text-stone-800 font-medium">Write with pre-loaded prompt</span>
+                    </div>
+                    <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-xl">
+                      <span className="text-[10px] font-mono uppercase text-stone-400 font-bold block">4. Change</span>
+                      <span className="text-stone-800 font-medium">Track evolved perspective</span>
+                    </div>
+                  </div>
+                </div>
 
-                  {/* Then vs Now Side-by-side Columns */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                    {/* THEN COLUMN */}
-                    <div className="p-4 rounded-xl bg-stone-50/70 border border-stone-200 space-y-3">
-                      <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                        <span className="font-mono text-xs font-bold text-stone-600 uppercase">
-                          THEN (Earlier Reflections)
+                {/* Loops List */}
+                <div className="space-y-4">
+                  {reflectionLoops.map((loop) => (
+                    <div
+                      key={loop.id}
+                      className="p-5 bg-white border border-stone-200/80 rounded-2xl shadow-xs space-y-4"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                          Theme: {loop.theme}
+                        </span>
+                        <span className="text-[10px] text-stone-400 font-mono">
+                          Active Loop
                         </span>
                       </div>
 
-                      <div className="space-y-2 text-xs">
-                        <p className="font-semibold text-stone-700">Recurring Themes:</p>
-                        <ul className="space-y-1 text-stone-600 pl-2">
-                          {patterns.thenVsNow.thenThemes.map((t, idx) => (
-                            <li key={idx}>• {t}</li>
-                          ))}
-                        </ul>
+                      {/* 4 Steps Visual */}
+                      <div className="space-y-3 text-xs">
+                        {/* 1. PATTERN */}
+                        <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-1">
+                          <span className="text-[10px] uppercase font-bold text-stone-400">
+                            1. Pattern
+                          </span>
+                          <p className="text-stone-800 leading-relaxed font-serif">
+                            "{loop.pattern}"
+                          </p>
+                        </div>
 
-                        <p className="font-semibold text-stone-700 pt-2">Earlier Concerns:</p>
-                        <ul className="space-y-1 text-stone-600 pl-2">
-                          {patterns.thenVsNow.thenConcerns.map((c, idx) => (
-                            <li key={idx}>• {c}</li>
-                          ))}
-                        </ul>
+                        {/* 2. QUESTION */}
+                        <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-1">
+                          <span className="text-[10px] uppercase font-bold text-indigo-700">
+                            2. Grounded Question
+                          </span>
+                          <p className="text-stone-900 font-serif italic text-sm">
+                            "{loop.question}"
+                          </p>
+                        </div>
 
-                        <p className="font-semibold text-stone-700 pt-2">Observed Patterns:</p>
-                        <ul className="space-y-1 text-stone-600 pl-2">
-                          {patterns.thenVsNow.thenPatterns.map((p, idx) => (
-                            <li key={idx}>• {p}</li>
-                          ))}
-                        </ul>
+                        {/* 3. REFLECTION ACTION */}
+                        <div className="p-3 bg-white border border-stone-200 rounded-xl flex items-center justify-between gap-3">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-stone-400">
+                              3. Reflection Action
+                            </span>
+                            <p className="text-stone-600 text-xs">
+                              Write your thoughts on this question to close the loop.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToWritePrompt(loop.reflectionPrompt || loop.question)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-medium text-xs shadow-xs transition-colors cursor-pointer shrink-0"
+                          >
+                            <span>Write about this</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* 4. CHANGE */}
+                        {loop.observedChange && (
+                          <div className="p-3 bg-emerald-50/40 border border-emerald-100 rounded-xl space-y-1">
+                            <span className="text-[10px] uppercase font-bold text-emerald-700">
+                              4. Observed Evolution & Change
+                            </span>
+                            <p className="text-stone-800 text-xs leading-relaxed">
+                              {loop.observedChange}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
-
-                    {/* NOW COLUMN */}
-                    <div className="p-4 rounded-xl bg-indigo-50/40 border border-indigo-100 space-y-3">
-                      <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
-                        <span className="font-mono text-xs font-bold text-indigo-700 uppercase">
-                          NOW (Recent Reflections)
-                        </span>
-                      </div>
-
-                      <div className="space-y-2 text-xs">
-                        <p className="font-semibold text-stone-700">Recurring Themes:</p>
-                        <ul className="space-y-1 text-stone-600 pl-2">
-                          {patterns.thenVsNow.nowThemes.map((t, idx) => (
-                            <li key={idx}>• {t}</li>
-                          ))}
-                        </ul>
-
-                        <p className="font-semibold text-stone-700 pt-2">Current Concerns:</p>
-                        <ul className="space-y-1 text-stone-600 pl-2">
-                          {patterns.thenVsNow.nowConcerns.map((c, idx) => (
-                            <li key={idx}>• {c}</li>
-                          ))}
-                        </ul>
-
-                        <p className="font-semibold text-stone-700 pt-2">Current Patterns:</p>
-                        <ul className="space-y-1 text-stone-600 pl-2">
-                          {patterns.thenVsNow.nowPatterns.map((p, idx) => (
-                            <li key={idx}>• {p}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* WHAT CHANGED EXPLANATION */}
-                  <div className="p-4 bg-stone-50 border border-stone-200/80 rounded-xl space-y-1.5">
-                    <span className="text-[10px] font-mono uppercase font-bold text-stone-500">
-                      What Changed?
-                    </span>
-                    <p className="text-xs text-stone-800 leading-relaxed">
-                      {patterns.thenVsNow.whatChangedGrounded}
-                    </p>
-                    <p className="text-[11px] text-stone-400 italic pt-1">
-                      Evidence notes: {patterns.thenVsNow.evidenceNotes}
-                    </p>
-                  </div>
+                  ))}
                 </div>
               </div>
             )}
 
-            {/* SUB-TAB 3: RECURRING THEMES & TIMELINE */}
-            {activeSubTab === 'themes' && (
+            {/* SUB-TAB 4: RECURRING THEMES & TIMELINE */}
+            {activeSubTab === 'themes' && patterns && (
               <div className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {patterns.recurringThemes.map((theme) => (
@@ -532,8 +808,8 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
               </div>
             )}
 
-            {/* SUB-TAB 4: REFLECTION MEMORY */}
-            {activeSubTab === 'memory' && (
+            {/* SUB-TAB 5: REFLECTION MEMORY */}
+            {activeSubTab === 'memory' && patterns && (
               <div className="space-y-4">
                 <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs text-stone-600">
                   <p className="font-medium text-stone-800">Lightweight Reflection Memory</p>
@@ -579,72 +855,189 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
               </div>
             )}
 
-            {/* SUB-TAB 5: FUTURE ME VAULT */}
+            {/* SUB-TAB 6: FUTURE ME VAULT (SIGNATURE FEATURE) */}
             {activeSubTab === 'futureMe' && (
-              <div className="space-y-4">
-                <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200/80 text-xs text-amber-900 space-y-1">
-                  <p className="font-semibold text-amber-950 flex items-center gap-1.5">
-                    <Bookmark className="w-3.5 h-3.5 text-amber-600 fill-amber-600" />
-                    <span>Future Me Reflections</span>
-                  </p>
-                  <p className="text-[11px] text-amber-800 leading-relaxed">
-                    Reflections marked with [Future Me] so you can look back with fresh eyes and connect earlier intentions with later realities.
-                  </p>
+              <div className="space-y-6">
+                {/* Header & Write Button */}
+                <div className="p-5 bg-amber-50/60 rounded-2xl border border-amber-200/80 shadow-xs space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Bookmark className="w-4 h-4 text-amber-700 fill-amber-700" />
+                        <h3 className="font-serif font-semibold text-stone-900 text-sm">
+                          Future Me Vault
+                        </h3>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-medium">
+                          Signature Feature
+                        </span>
+                      </div>
+                      <p className="text-xs text-amber-900/80 leading-relaxed">
+                        Write private messages to your future self. Once unlocked, MARGIN performs a grounded comparison between what you expected then vs what your writing shows now.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowFutureMeModal(true)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white text-xs font-medium shadow-xs transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Write to Future Me</span>
+                    </button>
+                  </div>
                 </div>
 
-                {reflections.filter((r) => r.isFutureMe).length === 0 ? (
-                  <div className="py-12 text-center text-xs text-stone-400 space-y-2">
+                {futureCompareError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>{futureCompareError}</span>
+                  </div>
+                )}
+
+                {allFutureMeEntries.length === 0 ? (
+                  <div className="py-16 text-center text-xs text-stone-400 space-y-3">
                     <Bookmark className="w-8 h-8 text-stone-300 mx-auto stroke-1" />
-                    <p className="font-medium text-stone-600">No reflections saved for Future Me yet</p>
-                    <p className="text-[11px] max-w-xs mx-auto">
-                      When writing a reflection in Journal, click the "Future Me" bookmark button to save it for your future self.
+                    <p className="font-medium text-stone-600">No letters written to Future Me yet</p>
+                    <p className="text-[11px] max-w-sm mx-auto">
+                      Click "Write to Future Me" above, or toggle the Future Me bookmark button inside any Journal reflection.
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {reflections
-                      .filter((r) => r.isFutureMe)
-                      .map((r) => (
+                  <div className="grid grid-cols-1 gap-4">
+                    {allFutureMeEntries.map((entry) => {
+                      const isLocked = entry.unlockDate && Date.now() < entry.unlockDate && !entry.isUnlocked;
+                      const unlockDateStr = entry.unlockDate
+                        ? new Date(entry.unlockDate).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })
+                        : null;
+
+                      return (
                         <div
-                          key={r.id}
-                          className="p-4 bg-white border border-stone-200/80 rounded-xl shadow-xs space-y-3"
+                          key={entry.id}
+                          className="p-5 bg-white border border-stone-200/80 rounded-2xl shadow-xs space-y-4"
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <h4 className="font-serif font-semibold text-stone-900 text-sm truncate">
-                              {r.title}
-                            </h4>
-                            <span className="text-[10px] text-stone-400">
-                              {new Date(r.createdAt).toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric',
-                              })}
-                            </span>
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2">
+                              {isLocked ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                                  <Lock className="w-3 h-3 text-amber-600" />
+                                  <span>Unlocks {unlockDateStr}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                                  <Unlock className="w-3 h-3 text-emerald-600" />
+                                  <span>Unlocked</span>
+                                </span>
+                              )}
+                              <h4 className="font-serif font-semibold text-stone-900 text-sm">
+                                {entry.title}
+                              </h4>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-xs text-stone-400">
+                              <span>
+                                Written on{' '}
+                                {new Date(entry.writtenAt).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric',
+                                })}
+                              </span>
+                              {onDeleteFutureMe && (
+                                <button
+                                  onClick={() => onDeleteFutureMe(entry.id)}
+                                  className="text-stone-400 hover:text-rose-600 transition-colors cursor-pointer"
+                                  title="Delete message"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
 
-                          {r.futureMeNote && (
-                            <div className="p-2 bg-amber-50 border border-amber-100 rounded text-[11px] text-amber-900 italic">
-                              Note to Future Self: "{r.futureMeNote}"
+                          {/* Message Content */}
+                          <div className="p-3.5 bg-amber-50/30 border border-amber-100 rounded-xl space-y-1">
+                            <span className="text-[10px] uppercase font-bold text-amber-800 font-mono">
+                              Message Content:
+                            </span>
+                            <p className="text-xs text-stone-800 font-serif italic leading-relaxed whitespace-pre-line">
+                              {entry.message}
+                            </p>
+                          </div>
+
+                          {/* COMPARISON RESULT IF PRESENT */}
+                          {entry.comparison ? (
+                            <div className="p-4 bg-stone-50 rounded-xl border border-stone-200/80 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] uppercase font-bold text-indigo-700 font-mono">
+                                  You Then vs You Now Analysis:
+                                </span>
+                                <span className="text-[10px] text-stone-400">
+                                  Analyzed {new Date(entry.comparison.analyzedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                                <div className="p-3 bg-white border border-stone-200 rounded-lg space-y-1">
+                                  <span className="text-[10px] uppercase font-bold text-stone-400">
+                                    You Then
+                                  </span>
+                                  <p className="text-stone-700 leading-relaxed font-serif">
+                                    "{entry.comparison.youThen}"
+                                  </p>
+                                </div>
+
+                                <div className="p-3 bg-white border border-indigo-100 rounded-lg space-y-1">
+                                  <span className="text-[10px] uppercase font-bold text-indigo-600">
+                                    You Now
+                                  </span>
+                                  <p className="text-stone-900 leading-relaxed font-serif">
+                                    "{entry.comparison.youNow}"
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="p-3 bg-white border border-stone-200 rounded-lg space-y-1 text-xs">
+                                <span className="text-[10px] uppercase font-bold text-emerald-700 font-mono">
+                                  What Changed:
+                                </span>
+                                <p className="text-stone-800 font-medium leading-relaxed">
+                                  {entry.comparison.whatChanged}
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Trigger Comparison Button */
+                            <div className="pt-2 flex items-center justify-between border-t border-stone-100">
+                              <span className="text-[11px] text-stone-500">
+                                Compare your past letter with your newer reflections
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCompareFutureMe(entry)}
+                                disabled={comparingFutureId === entry.id || reflections.length === 0}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-medium text-xs shadow-xs transition-colors disabled:opacity-40 cursor-pointer"
+                              >
+                                {comparingFutureId === entry.id ? (
+                                  <>
+                                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <span>Comparing with Present Me...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
+                                    <span>Compare with Present Me</span>
+                                  </>
+                                )}
+                              </button>
                             </div>
                           )}
-
-                          <p className="text-xs text-stone-600 line-clamp-3 leading-relaxed">
-                            {r.content}
-                          </p>
-
-                          <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-xs">
-                            <span className="text-[11px] text-stone-400">
-                              {r.wordCount} words
-                            </span>
-                            <button
-                              onClick={() => onOpenReflection(r.id)}
-                              className="text-xs font-semibold text-stone-900 hover:text-indigo-600 cursor-pointer"
-                            >
-                              Read full reflection →
-                            </button>
-                          </div>
                         </div>
-                      ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -652,6 +1045,20 @@ export const PatternsView: React.FC<PatternsViewProps> = ({
           </>
         )}
       </div>
+
+      {/* Modal for Writing to Future Me */}
+      {showFutureMeModal && (
+        <FutureMeModal
+          isOpen={showFutureMeModal}
+          onClose={() => setShowFutureMeModal(false)}
+          userId={userId}
+          reflections={reflections}
+          onSaveFutureMe={async (entry) => {
+            if (onSaveFutureMe) await onSaveFutureMe(entry);
+          }}
+          onOpenReflection={onOpenReflection}
+        />
+      )}
     </div>
   );
 };

@@ -7,6 +7,7 @@ interface NavbarProps {
   activeTab: ActiveTab;
   onSelectTab: (tab: ActiveTab) => void;
   onSignOut: () => void;
+  onOpenDataManagement?: () => void;
   insightCount?: number;
   hasStalePatterns?: boolean;
 }
@@ -16,6 +17,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onSelectTab,
   onSignOut,
+  onOpenDataManagement,
   insightCount = 0,
   hasStalePatterns = false,
 }) => {
@@ -141,6 +143,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {user.displayName || 'User'}
                 </p>
               </div>
+              {onOpenDataManagement && (
+                <button
+                  id="navbar-privacy-data-btn"
+                  onClick={onOpenDataManagement}
+                  title="Privacy, Security & Data Management"
+                  className="p-1.5 rounded-lg text-stone-500 hover:text-stone-900 hover:bg-stone-200/60 transition-colors cursor-pointer flex items-center gap-1 text-xs"
+                >
+                  <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="hidden md:inline text-[11px] font-medium text-stone-600">Privacy & Data</span>
+                </button>
+              )}
               <button
                 id="navbar-signout-btn"
                 onClick={onSignOut}

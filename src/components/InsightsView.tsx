@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { SavedInsight, InsightCategory, JournalReflection } from '../types';
+import { isDuplicateInsight } from '../lib/firebase';
 
 interface InsightsViewProps {
   userId: string;
@@ -46,6 +47,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newText, setNewText] = useState('');
   const [newCategory, setNewCategory] = useState<InsightCategory>('Pattern');
+  const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredInsights = insights.filter((item) => {
@@ -67,7 +69,13 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
 
   const handleCreateManual = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newText.trim()) return;
+    const trimmed = newText.trim();
+    if (!trimmed) return;
+
+    if (isDuplicateInsight(insights, trimmed) && !duplicateNotice) {
+      setDuplicateNotice('A similar insight already exists in your collection. Click "Save Anyway" if you wish to record this separately.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -75,7 +83,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
       const insight: SavedInsight = {
         id: `ins-${now}-${Math.random().toString(36).substring(2, 7)}`,
         userId,
-        text: newText.trim(),
+        text: trimmed,
         category: newCategory,
         sourceReflectionIds: [],
         createdAt: now,
@@ -83,6 +91,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
 
       await onSaveInsight(insight);
       setNewText('');
+      setDuplicateNotice(null);
       setShowCreateModal(false);
     } finally {
       setIsSubmitting(false);
@@ -308,17 +317,29 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
                 <textarea
                   rows={4}
                   value={newText}
-                  onChange={(e) => setNewText(e.target.value)}
+                  onChange={(e) => {
+                    setNewText(e.target.value);
+                    if (duplicateNotice) setDuplicateNotice(null);
+                  }}
                   placeholder="What realization or breakthrough did you have?..."
                   className="w-full text-xs bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-stone-900 placeholder-stone-400 focus:outline-none focus:border-stone-400 resize-none"
                   required
                 />
+                {duplicateNotice && (
+                  <div className="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                    <span>{duplicateNotice}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setDuplicateNotice(null);
+                  }}
                   className="px-3 py-1.5 rounded-lg text-xs text-stone-600 hover:bg-stone-100 cursor-pointer"
                 >
                   Cancel
@@ -328,7 +349,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
                   disabled={isSubmitting || !newText.trim()}
                   className="px-4 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-medium text-xs disabled:opacity-40 cursor-pointer shadow-xs"
                 >
-                  {isSubmitting ? 'Saving...' : 'Save Insight'}
+                  {isSubmitting ? 'Saving...' : duplicateNotice ? 'Save Anyway' : 'Save Insight'}
                 </button>
               </div>
             </form>

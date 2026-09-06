@@ -428,6 +428,21 @@ Generate a JSON object with the following structure:
     }
   ],
   "thenVsNow": {
+    "items": [
+      {
+        "id": "tvn-1",
+        "category": "concern",
+        "label": "Short label of the comparison",
+        "then": "Exact or closely paraphrased quote/summary from earlier (e.g., 'I’m worried about finding an internship.')",
+        "now": "Exact or closely paraphrased quote/summary from recent (e.g., 'I got an internship, but now I\\'m wondering whether it\\'s right for me.')",
+        "whatChanged": "Clear explanation of how thinking evolved (e.g., 'Your concern shifted from finding an opportunity to evaluating whether the opportunity fits you.')",
+        "status": "shifted",
+        "thenSourceId": "id1",
+        "nowSourceId": "id2",
+        "thenDate": "Date string",
+        "nowDate": "Date string"
+      }
+    ],
     "thenThemes": ["Theme 1", "Theme 2"],
     "thenConcerns": ["Earlier concern 1", "Earlier concern 2"],
     "thenPatterns": ["Earlier behavioral or thinking pattern"],
@@ -437,6 +452,18 @@ Generate a JSON object with the following structure:
     "whatChangedGrounded": "Clear narrative summary of the longitudinal evolution.",
     "evidenceNotes": "Notes on the timeframe and reflection density."
   },
+  "reflectionLoops": [
+    {
+      "id": "loop-1",
+      "theme": "Career Uncertainty",
+      "pattern": "Career direction and internship expectations appear repeatedly across multiple weeks.",
+      "question": "When you think about what kind of work excites you, what feels clearest versus what still feels unresolved?",
+      "reflectionPrompt": "When I look at my current career direction, the parts that feel aligned are...",
+      "observedChange": "Your focus evolved from external validation to personal alignment.",
+      "status": "observed_change",
+      "sourceReflectionIds": ["id1", "id2"]
+    }
+  ],
   "weeklyBrief": {
     "periodLabel": "Recent Reflections",
     "occupiedThoughts": ["Key area 1", "Key area 2", "Key area 3"],
@@ -447,7 +474,7 @@ Generate a JSON object with the following structure:
   "reflectionMemories": [
     {
       "id": "mem-1",
-      "type": "Goal" | "Value" | "Repeated Question" | "Recurring Challenge" | "Accomplishment" | "Perspective Shift",
+      "type": "Goal",
       "title": "Title of the memory item",
       "description": "What the user noted or worked on",
       "sourceReflectionIds": ["id1"],
@@ -491,6 +518,225 @@ Generate a JSON object with the following structure:
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error during pattern analysis';
       console.error('Error in /api/patterns:', message);
+      res.status(500).json({
+        success: false,
+        error: message,
+      });
+    }
+  });
+
+  // 6. Dedicated Then vs Now Longitudinal Analyzer
+  app.post('/api/then-vs-now', async (req, res) => {
+    try {
+      const data = req.body && typeof req.body === 'object' ? req.body : {};
+      const { reflections = [] } = data;
+
+      if (!Array.isArray(reflections) || reflections.length < 2) {
+        res.status(400).json({
+          success: false,
+          error: 'At least two reflections are required to perform a Then vs Now comparison.',
+        });
+        return;
+      }
+
+      const boundedReflections = reflections.slice(0, 25);
+      const formattedArchive = boundedReflections
+        .map((ref: { id: string; title: string; content: string; createdAt: number }) => {
+          const dateStr = new Date(ref.createdAt).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          });
+          return `ID: "${ref.id}" | DATE: "${dateStr}" | TITLE: "${ref.title || 'Untitled'}"
+EXCERPT: ${ref.content.substring(0, 900)}`;
+        })
+        .join('\n\n');
+
+      const systemInstruction = `You are MARGIN's dedicated Then vs Now longitudinal analyst.
+The core product identity of MARGIN is:
+"MARGIN doesn't just remember what you wrote. It helps you understand how your thinking changed over time."
+
+Your task: Compare reflections from earlier time periods against recent reflections across 7 key longitudinal dimensions:
+1. recurring topics
+2. changes in emotional tone
+3. changes in concerns
+4. changes in priorities
+5. changes in perspective
+6. repeated thoughts
+7. resolved vs unresolved concerns
+
+PRESENT COMPARISONS NATURALLY:
+THEN: “I’m worried about finding an internship.”
+NOW: “I got an internship, but now I'm wondering whether it's right for me.”
+WHAT CHANGED: “Your concern shifted from finding an opportunity to evaluating whether the opportunity fits you.”
+
+SAFETY & INTEGRITY MANDATES:
+- Only cite reflections from the user's journal archive. NEVER invent facts, outside biographical details, or unstated events.
+- Never diagnose mental illnesses or clinical conditions.
+- Ground every item with thenSourceId, nowSourceId, thenDate, nowDate.
+- Return strictly valid JSON.`;
+
+      const prompt = `Analyze these ${boundedReflections.length} chronological reflections and generate a comprehensive Then vs Now comparison:
+<JOURNAL_DATA>
+${formattedArchive}
+</JOURNAL_DATA>
+
+Generate a JSON object matching this schema:
+{
+  "items": [
+    {
+      "id": "tvn-1",
+      "category": "topic" | "emotional_tone" | "concern" | "priority" | "perspective" | "repeated_thought" | "resolved_status",
+      "label": "Short descriptive label (e.g., 'Career & Internship Direction')",
+      "then": "Paraphrase or quotation from earlier reflections",
+      "now": "Paraphrase or quotation from later reflections",
+      "whatChanged": "Clear, grounded explanation of how perspective, priority, or feeling shifted",
+      "status": "shifted" | "resolved" | "evolving" | "persistent",
+      "thenSourceId": "ID from journal data",
+      "nowSourceId": "ID from journal data",
+      "thenDate": "Date string",
+      "nowDate": "Date string"
+    }
+  ],
+  "thenThemes": ["Earlier theme 1", "Earlier theme 2"],
+  "thenConcerns": ["Earlier concern 1", "Earlier concern 2"],
+  "thenPatterns": ["Earlier pattern"],
+  "nowThemes": ["Current theme 1", "Current theme 2"],
+  "nowConcerns": ["Current concern 1"],
+  "nowPatterns": ["Current pattern"],
+  "whatChangedGrounded": "A coherent 2-3 paragraph grounded narrative explaining how the user's focus, emotional tone, and inner priorities evolved from earlier to present.",
+  "evidenceNotes": "Description of sample timeframe and confidence."
+}`;
+
+      const { text, modelUsed } = await generateContentWithFallback(
+        systemInstruction,
+        [{ role: 'user', parts: [{ text: prompt }] }],
+        { responseMimeType: 'application/json' }
+      );
+
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = JSON.parse(text.replace(/```json/g, '').replace(/```/g, '').trim());
+      }
+
+      res.json({
+        success: true,
+        comparison: parsed,
+        modelUsed,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error during Then vs Now analysis';
+      console.error('Error in /api/then-vs-now:', message);
+      res.status(500).json({
+        success: false,
+        error: message,
+      });
+    }
+  });
+
+  // 7. Dedicated "Future Me" Longitudinal Comparison Endpoint
+  app.post('/api/future-me-compare', async (req, res) => {
+    try {
+      const data = req.body && typeof req.body === 'object' ? req.body : {};
+      const { futureMessage, writtenAt, title, reflections = [] } = data;
+
+      if (!futureMessage || !futureMessage.trim()) {
+        res.status(400).json({
+          success: false,
+          error: 'Future Me message is required for comparison.',
+        });
+        return;
+      }
+
+      const writtenDateStr = writtenAt
+        ? new Date(writtenAt).toLocaleDateString('en-US', {
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+          })
+        : 'Earlier date';
+
+      // Find reflections written on or after the Future Me message (or recent ones if writtenAt is fresh)
+      const laterReflections = Array.isArray(reflections) && reflections.length > 0
+        ? reflections.slice(0, 15)
+        : [];
+
+      const formattedArchive = laterReflections
+        .map((ref: { id: string; title: string; content: string; createdAt: number }) => {
+          const dateStr = new Date(ref.createdAt).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          });
+          return `ID: "${ref.id}" | DATE: "${dateStr}" | TITLE: "${ref.title || 'Untitled'}"
+CONTENT: ${ref.content.substring(0, 900)}`;
+        })
+        .join('\n\n');
+
+      const systemInstruction = `You are MARGIN's Future Me comparison specialist.
+MARGIN's core philosophy:
+"MARGIN doesn't just remember what you wrote. It helps you understand how your thinking changed over time."
+
+The user wrote a private message to their future self in the past.
+Now, compare what they expected, feared, hoped for, or wanted at that time with what their newer reflections reveal today.
+
+STRICT PRINCIPLES:
+1. Grounding: Rely EXCLUSIVELY on the text of the Future Me message and the user's newer journal entries.
+2. Never invent outside facts, accomplishments, relationships, or events not present in the user's writing.
+3. If recent entries don't touch on a topic from the future letter, honestly state: "Your recent reflections do not explicitly mention this topic, showing your attention may have moved elsewhere."
+4. Deliver structured comparison:
+   - YOU THEN: What you expected, feared, hoped for, or wanted.
+   - YOU NOW: What your newer reflections show.
+   - WHAT CHANGED: A concise, grounded explanation of how your thinking evolved.
+5. Return strictly valid JSON.`;
+
+      const prompt = `FUTURE ME LETTER WRITTEN ON ${writtenDateStr}:
+Title: "${title || 'Message to Future Self'}"
+Letter Content:
+"${futureMessage.trim()}"
+
+USER'S SUBSEQUENT JOURNAL REFLECTIONS:
+<JOURNAL_DATA>
+${formattedArchive || 'No subsequent reflections written yet.'}
+</JOURNAL_DATA>
+
+Generate a JSON object with this exact schema:
+{
+  "youThen": "What you expected, feared, hoped for, or wanted when you wrote this letter.",
+  "youNow": "What your newer reflections show about where you are and what you focus on now.",
+  "whatChanged": "A concise, grounded explanation of how your thinking, priorities, or perspective evolved.",
+  "laterReflectionIds": ["matching-reflection-ids-used"]
+}`;
+
+      const { text, modelUsed } = await generateContentWithFallback(
+        systemInstruction,
+        [{ role: 'user', parts: [{ text: prompt }] }],
+        { responseMimeType: 'application/json' }
+      );
+
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = JSON.parse(text.replace(/```json/g, '').replace(/```/g, '').trim());
+      }
+
+      res.json({
+        success: true,
+        comparison: {
+          youThen: parsed.youThen,
+          youNow: parsed.youNow,
+          whatChanged: parsed.whatChanged,
+          laterReflectionIds: parsed.laterReflectionIds || [],
+          analyzedAt: Date.now(),
+        },
+        modelUsed,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error comparing Future Me';
+      console.error('Error in /api/future-me-compare:', message);
       res.status(500).json({
         success: false,
         error: message,

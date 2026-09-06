@@ -8,6 +8,7 @@ import { InsightsView } from './components/InsightsView';
 import { PatternsView } from './components/PatternsView';
 import { ReflectionModal } from './components/ReflectionModal';
 import { SecurityBadge } from './components/SecurityBadge';
+import { DataManagementModal } from './components/DataManagementModal';
 import {
   subscribeToAuth,
   signInWithGoogle,
@@ -21,6 +22,9 @@ import {
   fetchUserPatterns,
   saveUserPatterns,
   fetchUserFutureMe,
+  persistUserFutureMe,
+  removeUserFutureMe,
+  deleteAllUserData,
 } from './lib/firebase';
 import {
   UserProfile,
@@ -57,6 +61,9 @@ export default function App() {
 
   // Future Me
   const [futureMeEntries, setFutureMeEntries] = useState<FutureMeEntry[]>([]);
+
+  // Privacy & Data Management Modal
+  const [showDataManagementModal, setShowDataManagementModal] = useState(false);
 
   // Cross-tab interaction states
   const [askInitialQuestion, setAskInitialQuestion] = useState<string | null>(null);
@@ -222,6 +229,37 @@ export default function App() {
     }
   };
 
+  // Future Me Handlers
+  const handleSaveFutureMe = async (entry: FutureMeEntry) => {
+    if (!user?.uid) return;
+    await persistUserFutureMe(user.uid, entry);
+    setFutureMeEntries((prev) => {
+      const idx = prev.findIndex((e) => e.id === entry.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = entry;
+        return copy;
+      }
+      return [entry, ...prev];
+    });
+  };
+
+  const handleDeleteFutureMe = async (entryId: string) => {
+    if (!user?.uid) return;
+    await removeUserFutureMe(user.uid, entryId);
+    setFutureMeEntries((prev) => prev.filter((e) => e.id !== entryId));
+  };
+
+  const handleDeleteAllUserData = async () => {
+    if (!user?.uid) return;
+    await deleteAllUserData(user.uid);
+    setReflections([]);
+    setInsights([]);
+    setPatterns(null);
+    setFutureMeEntries([]);
+    setActiveReflectionId(null);
+  };
+
   // Cross-Navigation helpers
   const handleNavigateTabWithQuery = (tab: ActiveTab, initialQuery?: string) => {
     if (tab === 'ask' && initialQuery) {
@@ -268,6 +306,7 @@ export default function App() {
           setAskInitialQuestion(null);
         }}
         onSignOut={handleSignOut}
+        onOpenDataManagement={() => setShowDataManagementModal(true)}
         insightCount={insights.length}
         hasStalePatterns={patterns ? reflections.length !== patterns.entryCount : false}
       />
@@ -391,6 +430,8 @@ export default function App() {
                   onTriggerReanalyze={handleTriggerReanalyze}
                   onOpenReflection={handleOpenReflectionById}
                   onNavigateToWritePrompt={handleNavigateToWritePrompt}
+                  onSaveFutureMe={handleSaveFutureMe}
+                  onDeleteFutureMe={handleDeleteFutureMe}
                 />
               </div>
             )}
@@ -408,6 +449,21 @@ export default function App() {
             setActiveTab('journal');
             setMobileJournalView('editor');
           }}
+        />
+      )}
+
+      {/* Privacy, Security & Data Management Modal */}
+      {showDataManagementModal && user && (
+        <DataManagementModal
+          isOpen={showDataManagementModal}
+          onClose={() => setShowDataManagementModal(false)}
+          userId={user.uid}
+          userEmail={user.email}
+          reflections={reflections}
+          insights={insights}
+          futureMeEntries={futureMeEntries}
+          patterns={patterns}
+          onDeleteAllData={handleDeleteAllUserData}
         />
       )}
     </div>

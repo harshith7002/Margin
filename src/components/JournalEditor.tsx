@@ -52,6 +52,7 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
   const [content, setContent] = useState('');
   const [isFutureMe, setIsFutureMe] = useState(false);
   const [futureMeNote, setFutureMeNote] = useState('');
+  const [futureMeUnlockPreset, setFutureMeUnlockPreset] = useState('immediate');
   const [showFutureMeInput, setShowFutureMeInput] = useState(false);
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
   const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
@@ -129,6 +130,13 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
     const now = Date.now();
     const finalTitle = title.trim() || `Reflection — ${new Date(now).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 
+    let futureMeUnlockDate: number | null = null;
+    if (isFutureMe && futureMeUnlockPreset !== 'immediate') {
+      const day = 24 * 60 * 60 * 1000;
+      const days = futureMeUnlockPreset === '1_month' ? 30 : futureMeUnlockPreset === '3_months' ? 90 : futureMeUnlockPreset === '6_months' ? 180 : 365;
+      futureMeUnlockDate = now + days * day;
+    }
+
     const reflectionToSave: JournalReflection = {
       id: activeReflection ? activeReflection.id : `ref-${now}-${Math.random().toString(36).substring(2, 7)}`,
       userId,
@@ -138,6 +146,7 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
       charCount,
       isFutureMe,
       futureMeNote: isFutureMe ? futureMeNote.trim() : undefined,
+      futureMeUnlockDate: isFutureMe ? futureMeUnlockDate : null,
       mode,
       turns,
       createdAt: activeReflection ? activeReflection.createdAt : now,
@@ -327,16 +336,32 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
 
       {/* Future Me Note expandable banner */}
       {isFutureMe && showFutureMeInput && (
-        <div className="px-4 py-2.5 bg-amber-50/70 border-b border-amber-200/70 flex items-center gap-2 text-xs text-amber-900">
-          <Bookmark className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-          <span className="font-medium shrink-0">Note to Future You:</span>
+        <div className="px-4 py-2 bg-amber-50/80 border-b border-amber-200 flex flex-wrap items-center gap-2 text-xs text-amber-900">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Bookmark className="w-3.5 h-3.5 text-amber-700 shrink-0 fill-amber-700" />
+            <span className="font-medium">Note to Future You:</span>
+          </div>
           <input
             type="text"
             value={futureMeNote}
             onChange={(e) => setFutureMeNote(e.target.value)}
-            placeholder="e.g., Check if this decision brought peace or if you pivoted..."
-            className="flex-1 bg-white/80 border border-amber-200 rounded px-2 py-1 text-xs text-amber-950 placeholder-amber-700/60 focus:outline-none"
+            placeholder="e.g., Check if this decision brought clarity or if you pivoted..."
+            className="flex-1 min-w-[200px] bg-white border border-amber-200 rounded px-2 py-1 text-xs text-amber-950 placeholder-amber-700/60 focus:outline-none focus:border-amber-400"
           />
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[10px] text-amber-800">Unlock:</span>
+            <select
+              value={futureMeUnlockPreset}
+              onChange={(e) => setFutureMeUnlockPreset(e.target.value)}
+              className="bg-white border border-amber-200 rounded px-2 py-1 text-[11px] text-amber-900 focus:outline-none cursor-pointer"
+            >
+              <option value="immediate">Immediate</option>
+              <option value="1_month">1 Month</option>
+              <option value="3_months">3 Months</option>
+              <option value="6_months">6 Months</option>
+              <option value="1_year">1 Year</option>
+            </select>
+          </div>
         </div>
       )}
 

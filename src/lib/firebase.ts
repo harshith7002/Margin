@@ -252,6 +252,44 @@ export async function removeFutureMe(
   await deleteDoc(docRef);
 }
 
+/* =========================================================================
+   DATA MANAGEMENT / PURGE
+   ========================================================================= */
+
+/**
+ * Permanently removes all user-scoped data across all subcollections in Cloud Firestore.
+ * Requires user confirmation before execution.
+ */
+export async function deleteAllUserData(userId: string): Promise<void> {
+  if (!userId) throw new Error('User ID is required for data deletion');
+
+  const subcollections = ['interactions', 'insights', 'patterns', 'futureMe'];
+  for (const subcol of subcollections) {
+    const colRef = collection(db, 'users', userId, subcol);
+    const snap = await getDocs(colRef);
+    const deletions = snap.docs.map((d) => deleteDoc(d.ref));
+    await Promise.all(deletions);
+  }
+}
+
+/**
+ * Checks if an insight is a semantic or literal duplicate of existing insights.
+ */
+export function isDuplicateInsight(
+  existingInsights: SavedInsight[],
+  candidateText: string
+): boolean {
+  const normalizedCandidate = candidateText.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  return existingInsights.some((item) => {
+    const normalizedExisting = item.text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+    return (
+      normalizedExisting === normalizedCandidate ||
+      normalizedExisting.includes(normalizedCandidate) ||
+      normalizedCandidate.includes(normalizedExisting)
+    );
+  });
+}
+
 // Aliases
 export const fetchUserInsights = fetchSavedInsights;
 export const saveUserInsight = persistSavedInsight;
@@ -259,4 +297,6 @@ export const removeUserInsight = removeSavedInsight;
 export const fetchUserPatterns = fetchPatterns;
 export const saveUserPatterns = persistPatterns;
 export const fetchUserFutureMe = fetchFutureMeEntries;
+export const persistUserFutureMe = persistFutureMe;
+export const removeUserFutureMe = removeFutureMe;
 

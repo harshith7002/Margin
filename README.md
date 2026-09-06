@@ -150,10 +150,18 @@ Every user interaction has a corresponding verification scenario:
 - **Step 7.2**: Inspect "Something Changed" proactive shift banner with earlier vs recent reflections and confidence score.
 - **Step 7.3**: Inspect "Weekly Reflection Brief" (occupied thoughts, what stood out, worth exploring, next question).
 - **Step 7.4**: Under "Personal Question Generator", click `Write about this →`. Verify it seamlessly switches to the Journal tab with the question prefilled into the writing canvas.
-- **Step 7.5**: Open "Then vs Now" sub-tab. Verify side-by-side comparison of earlier and recent themes/concerns.
-- **Step 7.6**: Open "Reflection Memory" and "Future Me" sub-tabs to view longitudinal archives.
-- **Step 7.7**: Click "Re-analyze" to trigger refreshed pattern extraction via `/api/patterns`.
+- **Step 7.5**: Open "Then vs Now" sub-tab. Select category filters (All, Concerns, Priorities, Emotional Tone, Perspective). Click "Run Focused Comparison" to trigger dynamic cross-time analysis.
+- **Step 7.6**: Open "Reflection Loop" sub-tab. Verify the 4-phase cycle: Pattern Noticed → Generated Question → New Reflection → Observed Shift.
+- **Step 7.7**: Open "Future Me Vault" sub-tab. Click "Write to Future Self" to open `FutureMeModal`. Set an unlock horizon (Immediate, 1 Month, 3 Months, 6 Months, 1 Year).
+- **Step 7.8**: In Future Me Vault, click "Compare with Current Thinking" on an unlocked letter to run Gemini comparative analysis.
+- **Step 7.9**: Click "Re-analyze" in header to trigger refreshed pattern extraction via `/api/patterns`.
 
-### Test Case 8: Strict Data Isolation & Sign Out
-- **Step 8.1**: Verify "Security Architecture Active" badge displaying `/users/{userId}/*` path isolation.
-- **Step 8.2**: Click Sign Out button in Navbar. Verify local state clears completely and user returns to the clean Landing Hero.
+### Test Case 8: Privacy, Security & Data Management
+- **Step 8.1**: Click the "Privacy & Data" button with the shield icon in the top navigation bar.
+- **Step 8.2**: Inspect the Security Architecture overview showing authenticated user ID and zero cross-user sharing guarantees.
+- **Step 8.3**: Click "Export All Data (JSON)". Verify your browser immediately downloads an encrypted, timestamped archive of all reflections, insights, and letters.
+- **Step 8.4**: Inspect the "Permanently Delete All Data" section. Click "Delete All Data". Observe the red confirmation warning requiring explicit double-confirmation before purging Firestore documents.
+
+### Test Case 9: Strict Data Isolation & Sign Out
+- **Step 9.1**: Verify "Security Architecture Active" badge displaying `/users/{userId}/*` path isolation.
+- **Step 9.2**: Click Sign Out button in Navbar. Verify local state clears completely and user returns to the clean Landing Hero.

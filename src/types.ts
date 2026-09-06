@@ -18,6 +18,7 @@ export interface JournalReflection {
   charCount: number;
   isFutureMe?: boolean;
   futureMeNote?: string;
+  futureMeUnlockDate?: number | null;
   mode?: ReflectionMode;
   turns?: TurnMessage[];
   createdAt: number;
@@ -93,7 +94,31 @@ export interface SomethingChangedInsight {
   confidence: 'Strong evidence' | 'Moderate evidence' | 'Emerging pattern';
 }
 
+export type ThenVsNowCategory =
+  | 'topic'
+  | 'emotional_tone'
+  | 'concern'
+  | 'priority'
+  | 'perspective'
+  | 'repeated_thought'
+  | 'resolved_status';
+
+export interface ThenVsNowItem {
+  id: string;
+  category: ThenVsNowCategory;
+  label: string;
+  then: string;
+  now: string;
+  whatChanged: string;
+  status?: 'shifted' | 'resolved' | 'evolving' | 'persistent';
+  thenSourceId?: string;
+  nowSourceId?: string;
+  thenDate?: string;
+  nowDate?: string;
+}
+
 export interface ThenVsNowComparison {
+  items?: ThenVsNowItem[];
   thenThemes: string[];
   thenConcerns: string[];
   thenPatterns: string[];
@@ -134,6 +159,19 @@ export interface PersonalQuestion {
   theme: string;
 }
 
+export interface ReflectionLoopItem {
+  id: string;
+  theme: string;
+  pattern: string; // e.g. "Career uncertainty appears repeatedly in your reflections."
+  question: string; // e.g. "When you think about your career, what feels hardest to decide?"
+  reflectionPrompt: string; // Direct text for Journal writing
+  observedChange?: string; // e.g. "Your concern shifted from finding an opportunity to evaluating whether it fits you."
+  status: 'active' | 'in_reflection' | 'observed_change';
+  sourceReflectionIds: string[];
+  firstObservedDate?: string;
+  lastUpdatedDate?: string;
+}
+
 export interface PatternsData {
   id: string;
   userId: string;
@@ -146,15 +184,30 @@ export interface PatternsData {
   weeklyBrief: WeeklyBrief;
   reflectionMemories: ReflectionMemoryItem[];
   personalQuestions: PersonalQuestion[];
+  reflectionLoops?: ReflectionLoopItem[];
+}
+
+export interface FutureMeComparison {
+  youThen: string;
+  youNow: string;
+  whatChanged: string;
+  analyzedAt: number;
+  laterReflectionIds: string[];
 }
 
 export interface FutureMeEntry {
   id: string;
   userId: string;
-  reflectionId: string;
-  reflectionTitle: string;
-  reflectionSnippet: string;
+  reflectionId?: string;
+  reflectionTitle?: string;
+  reflectionSnippet?: string;
+  title: string;
+  message: string;
   writtenAt: number;
+  unlockDate?: number | null;
+  isUnlocked?: boolean;
+  unlockedAt?: number;
+  comparison?: FutureMeComparison | null;
   noteToFutureSelf?: string;
   laterReflectionsFound?: {
     id: string;
