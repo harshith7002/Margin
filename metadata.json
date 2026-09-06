@@ -1,0 +1,8 @@
+{
+  "name": "MARGIN",
+  "description": "Make room for thought. A private AI-powered reflection workspace helping you understand the evolution of your thoughts over time with Gemini and Cloud Firestore.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
